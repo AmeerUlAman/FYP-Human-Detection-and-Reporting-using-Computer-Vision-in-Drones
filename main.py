@@ -10,7 +10,7 @@ from docx.shared import Inches
 # Load the pre-trained YOLO model (ensure the correct model path)
 model = YOLO("yolov8n.pt")  # Use the most suitable model for your setup
 
-# Initialize video capture (replace 1 with your webcam index if needed)
+# Initialize video capture (replace 0 with your webcam index if needed)
 cap = cv2.VideoCapture(0)
 
 # To store the last saved bounding box coordinates and time
@@ -68,44 +68,45 @@ while True:
     results = model(frame)
 
     # Check if results contain any predictions
-    if results:
-        # Extracting bounding boxes, confidences, and class IDs
-        for result in results[0].boxes:  # Access the first result, which is usually a list of boxes
-            x1, y1, x2, y2 = result.xyxy[0]  # xyxy format (top-left, bottom-right coordinates)
-            conf = result.conf[0]  # Confidence score for detection
-            cls = result.cls[0]  # Class index (0 for person, 1 for bicycle, etc.)
+    if results[0].boxes:  # Access the boxes from results
+        for box in results[0].boxes:  # Iterate through detected boxes
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())  # Get bounding box coordinates
+            conf = box.conf[0].item()  # Confidence score for detection
+            cls = int(box.cls[0].item())  # Class index (0 for person, etc.)
 
-            if conf > 0.5 and int(cls) == 0:  # Class 0 corresponds to 'person'
-                # Check if the person is a new detection
+            if conf > 0.5 and cls == 0:  # Class 0 corresponds to 'person'
                 current_time = time.time()
 
                 # Check if enough time has passed since the last save
                 if current_time - last_save_time > save_delay:
-                    # Check if any of the previous bounding boxes are close enough to the new one
                     new_detection = True
-                    for box in last_saved_boxes:
-                        if calculate_distance((x1, y1, x2, y2), box) < proximity_threshold:
+                    for saved_box in last_saved_boxes:
+                        if calculate_distance((x1, y1, x2, y2), saved_box) < proximity_threshold:
                             new_detection = False
                             break
-                    
-                    # If it's a new detection, save the image and add to Word document
+
                     if new_detection:
-                        # Save the image with a unique filename
-                        timestamp = time.strftime("%Y%m%d-%H%M%S")  # Get current timestamp for unique naming
+                        # Crop the detected person from the frame
+                        cropped_person = frame[y1:y2, x1:x2]
+
+                        # Save the cropped image
+                        timestamp = time.strftime("%Y%m%d-%H%M%S")
                         image_filename = f"human_{timestamp}_{image_counter}.jpg"
                         image_path = os.path.join(output_folder, image_filename)
-                        cv2.imwrite(image_path, frame)
+                        cv2.imwrite(image_path, cropped_person)
                         image_counter += 1  # Increment counter for the next image
-                        last_saved_boxes.append((x1, y1, x2, y2))  # Store the bounding box of the saved detection
-                        last_save_time = current_time  # Update the last save time
+
+                        # Store bounding box and update the last save time
+                        last_saved_boxes.append((x1, y1, x2, y2))
+                        last_save_time = current_time
 
                         # Add the saved image to the list of human detections
                         human_images.append((image_path, image_filename.split('.')[0]))  # Save image path and ID
 
                 # Draw the bounding box around the person
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)  # Green box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green box
                 label = f"Person {conf:.2f}"  # Add confidence level as label
-                cv2.putText(frame, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
     # Show the frame with the bounding boxes
     cv2.imshow("Human Detection", frame)
@@ -120,7 +121,7 @@ doc = Document()
 # Generate the Word report
 create_doc_report(doc, len(human_images))
 
-# Add images and their IDs to the Word document
+# Add cropped images and their IDs to the Word document
 for idx, (image_path, image_id) in enumerate(human_images, start=1):
     add_image_to_doc(doc, image_path, f"ID: {idx}")
 
